@@ -243,7 +243,11 @@ void WP_render_ime()
     // 两分 mode indicator
     if (code.length() == 0 && ime.composing())
     {
-        M5Cardputer.Display.drawString("LF:", 2, barY);
+        if (ime.isLfMode()) {
+            M5Cardputer.Display.drawString("LF:", 2, barY);
+        } else if (ime.isDeleteMode()) {
+            M5Cardputer.Display.drawString("DD:", 2, barY);
+        }
     }
     // Draw selected hanzi in CJK font, remaining pinyin in Latin font
     String pinyin = ime.composition(); // just the pinyin part

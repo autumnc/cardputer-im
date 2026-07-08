@@ -59,7 +59,11 @@ public:
     const std::vector<String> &candidates() const { return _page; }
 
     // True when there is something to draw in the candidate bar.
-    bool composing() const { return _code.length() > 0 || _predicting || _lfMode; }
+    bool composing() const { return _code.length() > 0 || _predicting || _lfMode || _deleteMode; }
+
+    // Mode indicators
+    bool isLfMode() const { return _lfMode; }
+    bool isDeleteMode() const { return _deleteMode; }
 
     // Predictive text (联想): after committing a character, show follow-up
     // words. Call beginPredict() with the committed text; the IME will show

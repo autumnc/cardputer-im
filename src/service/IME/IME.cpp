@@ -418,7 +418,7 @@ void IME::lookup()
     static bool dictLoaded = false;
     if (!dictLoaded) { dictLoaded = true; loadUserDict(); loadLfDict(); }
 
-    if (!_loaded || _code.length() == 0)
+    if (!_loaded || (_code.length() == 0 && !_deleteMode && !_lfMode))
     {
         buildPage();
         return;
@@ -457,7 +457,9 @@ void IME::lookup()
         // 只匹配用户词库
         std::vector< std::pair<int, String> > userMatches;
         for (auto &p : _userWords) {
-            if (p.code.length() >= qlen && strncmp(p.code.c_str(), q, qlen) == 0) {
+            // 如果code为空,显示所有用户词条;否则前缀匹配
+            if (qlen == 0 ||
+                (p.code.length() >= qlen && strncmp(p.code.c_str(), q, qlen) == 0)) {
                 userMatches.push_back({p.count, p.word});
             }
         }
@@ -927,7 +929,19 @@ bool IME::commit(int idx, String &out)
     // 删除模式: 选择词条后删除
     if (_deleteMode)
     {
-        removeUserWord(_code, out);
+        // 从用户词库查找并删除该词条
+        // 需要找到匹配的完整code（因为_code可能只是前缀或为空）
+        bool deleted = false;
+        for (auto it = _userWords.begin(); it != _userWords.end(); ++it) {
+            if (it->word == out) {
+                // 找到匹配的词条，删除
+                _userWords.erase(it);
+                _userDirty = true;
+                saveUserDict();
+                deleted = true;
+                break;
+            }
+        }
         // 清空输出,不插入到编辑器
         out = "";
         reset();
@@ -1063,21 +1077,25 @@ bool IME::handleKey(int key, String &out)
         char c = (char)tolower(key);
 
         // 删除模式: first letter 'v' activates delete mode
-        if (_code.length() == 0 && c == 'v')
+        if (_code.length() == 0 && !_deleteMode && !_lfMode && c == 'v')
         {
             if (_userWords.size() > 0) {
                 _deleteMode = true;
+                // 触发lookup显示用户词库所有词条
+                lookup();
                 return true;
             }
         }
 
         // 两分拆字: first letter 'u' activates 两分 mode
         // 两分拆字: first 'u' activates liangfen mode
-        if (_code.length() == 0 && c == 'u')
+        if (_code.length() == 0 && !_deleteMode && !_lfMode && c == 'u')
         {
             loadLfDict();
             if (_lfBlob) { _lfMode = true; return true; }
         }
+
+        // 在删除模式或两分模式下，正常构建code
         if ((int)_code.length() < _maxCode)
         {
             _code += c;
