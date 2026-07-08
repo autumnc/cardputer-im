@@ -1,6 +1,9 @@
 # Cardputer IM - 拼音输入法固件
 
-> Fork 自 [micro-journal-wubi-v4-esp32](https://github.com/scateu/micro-journal-wubi-v4-esp32.git) 并进行了大量修改和增强
+> Fork 自 [micro-journal-wubi-v4-4-esp32](https://github.com/scateu/micro-journal-wubi-v4-esp32.git) 并进行了大量修改和增强
+
+**版本**: 1.0.0  
+**发布日期**: 2026-07-08
 
 ## 项目简介
 
