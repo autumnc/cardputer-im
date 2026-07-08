@@ -200,6 +200,57 @@ void IME::addUserWord(const String &code, const String &word)
     saveUserDict();
 }
 
+void IME::removeUserWord(const String &code, const String &word)
+{
+    // 删除指定的用户词条
+    for (auto it = _userWords.begin(); it != _userWords.end(); ++it) {
+        if (it->code == code && it->word == word) {
+            _userWords.erase(it);
+            _userDirty = true;
+            saveUserDict();
+            return;
+        }
+    }
+}
+
+void IME::clearUserDict()
+{
+    // 清空整个用户词库
+    if (_userWords.empty()) return;
+
+    _userWords.clear();
+    _userDirty = true;
+    saveUserDict();
+
+    // 同时删除SPIFFS文件
+    if (SPIFFS.begin(false)) {
+        SPIFFS.remove("/ime_user.txt");
+    }
+}
+
+void IME::pruneUserDict(int minCount)
+{
+    // 删除频次低于minCount的词条
+    // minCount=0时删除所有count=0的词条(从未被选择的)
+    // minCount>0时删除count<minCount的词条
+
+    size_t before = _userWords.size();
+
+    auto it = _userWords.begin();
+    while (it != _userWords.end()) {
+        if (it->count < minCount) {
+            it = _userWords.erase(it);
+            _userDirty = true;
+        } else {
+            ++it;
+        }
+    }
+
+    if (_userDirty) {
+        saveUserDict();
+    }
+}
+
 // ---- 两分拆字 (embedded PROGMEM array in lf_data.cpp) --------------------
 extern "C" const uint8_t _lf_data[];
 
@@ -326,6 +377,7 @@ void IME::reset()
     _prefix = "";
     _remainder = "";
     _lfMode = false;
+    _deleteMode = false;
 }
 
 // Narrow to the record window that can match the first one/two typed letters,
@@ -395,6 +447,33 @@ void IME::lookup()
             for (auto &e : _all) if (e == h) { dup = true; break; }
             if (!dup) _all.push_back(h);
         }
+        buildPage();
+        return;
+    }
+
+    // 删除模式: code starting with 'v' → only match user dict, delete on select
+    if (_deleteMode)
+    {
+        // 只匹配用户词库
+        std::vector< std::pair<int, String> > userMatches;
+        for (auto &p : _userWords) {
+            if (p.code.length() >= qlen && strncmp(p.code.c_str(), q, qlen) == 0) {
+                userMatches.push_back({p.count, p.word});
+            }
+        }
+
+        // 按频次降序排序
+        std::sort(userMatches.begin(), userMatches.end(),
+            [](const std::pair<int,String> &a, const std::pair<int,String> &b) {
+                return a.first > b.first;
+            });
+
+        // 添加到候选列表
+        for (auto &m : userMatches) {
+            _all.push_back(m.second);
+            if (_all.size() >= 100) break;
+        }
+
         buildPage();
         return;
     }
@@ -845,6 +924,16 @@ bool IME::commit(int idx, String &out)
         return false;
     out = _page[idx];
 
+    // 删除模式: 选择词条后删除
+    if (_deleteMode)
+    {
+        removeUserWord(_code, out);
+        // 清空输出,不插入到编辑器
+        out = "";
+        reset();
+        return true;
+    }
+
     // 逐字 continuation: selected hanzi replaces the matched pinyin in
     // the code area, remaining pinyin is processed next.  e.g. type
     // "zhongmeizhou" → select "中" → display "中meizhou" → select "美"
@@ -972,6 +1061,16 @@ bool IME::handleKey(int key, String &out)
     if ((key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z'))
     {
         char c = (char)tolower(key);
+
+        // 删除模式: first letter 'v' activates delete mode
+        if (_code.length() == 0 && c == 'v')
+        {
+            if (_userWords.size() > 0) {
+                _deleteMode = true;
+                return true;
+            }
+        }
+
         // 两分拆字: first letter 'u' activates 两分 mode
         // 两分拆字: first 'u' activates liangfen mode
         if (_code.length() == 0 && c == 'u')
