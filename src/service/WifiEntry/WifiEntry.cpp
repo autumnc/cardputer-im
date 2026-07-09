@@ -135,6 +135,20 @@ void wifi_config_load()
     File file = gfs()->open("/wifi.json", "r");
     if (file)
     {
+        // Check file size limit to prevent memory exhaustion
+        const size_t MAX_WIFI_CONFIG = 4096;  // 4KB limit
+        size_t fileSize = file.size();
+
+        if (fileSize > MAX_WIFI_CONFIG) {
+            _log("wifi.json too large: %u bytes (max %u)\n",
+                 (unsigned)fileSize, (unsigned)MAX_WIFI_CONFIG);
+            app["error"] = format("WiFi config too large (%u bytes). Max: %u bytes.",
+                                  (unsigned)fileSize, (unsigned)MAX_WIFI_CONFIG);
+            app["screen"] = ERRORSCREEN;
+            file.close();
+            return;
+        }
+
         // read the file
         _log("Reading wifi.json file\n");
         String wifiString = file.readString();
@@ -167,8 +181,9 @@ void wifi_config_load()
             app["error"] = "Wrong format wifi.json";
             app["screen"] = ERRORSCREEN;
 
-            // delete wifi.json from SD
-            gfs()->remove("/wifi.json");
+            // Backup corrupted file instead of deleting it
+            _log("Backing up corrupted wifi.json to wifi.json.bak\n");
+            gfs()->rename("/wifi.json", "/wifi.json.bak");
 
             return;
         }

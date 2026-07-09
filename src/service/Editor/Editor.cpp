@@ -244,6 +244,17 @@ bool Editor::saveFile()
     // The buffer is a window onto [seekPos, seekPos+loadedLength) on disk.
     // Anything outside that window (before seekPos, after windowEnd) must
     // survive the save untouched.
+
+    // Check for integer overflow before calculating windowEnd
+    if (seekPos > SIZE_MAX - loadedLength) {
+        _log("File offset overflow: seekPos=%u, loadedLength=%u\n",
+             (unsigned)seekPos, (unsigned)loadedLength);
+        app["error"] = "File offset overflow. File too large.";
+        app["screen"] = ERRORSCREEN;
+        savingInProgress = false;
+        return false;
+    }
+
     size_t newLength = getBufferSize();
     size_t windowEnd = seekPos + loadedLength;
     bool hasTrailingData = windowEnd < fileSize;

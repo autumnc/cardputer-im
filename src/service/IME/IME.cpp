@@ -137,12 +137,20 @@ void IME::loadUserDict()
 
     // Safety limit: don't read more than 8KB to prevent blocking
     const size_t MAX_READ = 8192;
+    const size_t MAX_LINE_LENGTH = 256;  // Prevent DoS from ultra-long lines
     size_t bytesRead = 0;
 
     while (f.available() && bytesRead < MAX_READ) {
         String line = f.readStringUntil('\n');
+
+        // Skip lines that are too long (potential DoS attack)
+        if (line.length() > MAX_LINE_LENGTH) {
+            _log("[IME] User dict line too long (%d bytes), skipping\n", (int)line.length());
+            continue;
+        }
+
         line.trim();
-        bytesRead += line.length();
+        bytesRead += line.length() + 1;  // +1 for '\n' (more accurate count)
 
         if (line.length() < 3) continue;
         int sp1 = line.indexOf(' ');
@@ -363,15 +371,20 @@ void IME::reset()
     _code = "";
 
     // Preserve reasonable capacity to avoid reallocation on next lookup.
-    // Only shrink excessively large vectors that accumulated from previous
-    // higher candidate limits or edge cases.
+    // Only shrink excessively large vectors to reduce memory fragmentation.
+    // Reserve reasonable initial capacity if too small.
+
     _all.clear();
-    if (_all.capacity() > 100)
-        _all.shrink_to_fit();      // Release excess capacity
+    if (_all.capacity() > 200)  // Raised threshold from 100 to 200
+        _all.shrink_to_fit();    // Release excess capacity
+    else if (_all.capacity() < 50)
+        _all.reserve(50);        // Pre-allocate reasonable size
 
     _page.clear();
-    if (_page.capacity() > _pageSize)
-        _page.shrink_to_fit();     // Release excess capacity
+    if (_page.capacity() > _pageSize * 2)  // Raised threshold
+        _page.shrink_to_fit();              // Release excess capacity
+    else if (_page.capacity() < _pageSize)
+        _page.reserve(_pageSize);           // Pre-allocate page size
 
     _pageStart = 0;
     _prefix = "";

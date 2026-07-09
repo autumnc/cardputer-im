@@ -267,17 +267,34 @@ void sync_send()
     File file = gfs()->open(ed.fileName.c_str(), "r");
     if (file) {
         size_t fileSize = file.size();
+
         // Check heap availability (leave margin for HTTP operations)
-        // Use addition to prevent integer underflow when freeHeap < margin
-        if (fileSize + SYNC_HEAP_MARGIN > ESP.getFreeHeap()) {
+        // Avoid integer overflow by checking separately
+        size_t freeHeap = ESP.getFreeHeap();
+        bool heapOk = false;
+
+        if (fileSize > freeHeap) {
+            // File is larger than available heap
+            heapOk = false;
+        } else if (freeHeap - fileSize < SYNC_HEAP_MARGIN) {
+            // Not enough margin after loading file
+            heapOk = false;
+        } else {
+            heapOk = true;
+        }
+
+        if (!heapOk) {
             sync_stop();
-            app["sync_error"] = "File too large for sync.";
+            app["sync_error"] = format("File too large (%u bytes). Free heap: %u bytes.",
+                                       (unsigned)fileSize, (unsigned)freeHeap);
             app["sync_state"] = SYNC_ERROR;
             app["clear"] = true;
-            _log("[sync_send] File too large: %u bytes\n", (unsigned)fileSize);
+            _log("[sync_send] File too large: %u bytes, free heap: %u\n",
+                 (unsigned)fileSize, (unsigned)freeHeap);
             file.close();
             return;
         }
+
         content = file.readString();
         file.close();
     } else {
