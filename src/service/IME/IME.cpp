@@ -139,6 +139,7 @@ void IME::loadUserDict()
     const size_t MAX_READ = 8192;
     const size_t MAX_LINE_LENGTH = 256;  // Prevent DoS from ultra-long lines
     size_t bytesRead = 0;
+    bool hadDuplicates = false;
 
     while (f.available() && bytesRead < MAX_READ) {
         String line = f.readStringUntil('\n');
@@ -166,10 +167,38 @@ void IME::loadUserDict()
         } else {
             word = line.substring(sp1 + 1);
         }
-        if (code.length() >= 1 && word.length() >= 2)
-            _userWords.push_back({code, word, count});
+
+        if (code.length() >= 1 && word.length() >= 2) {
+            // Check for duplicates before adding
+            bool isDuplicate = false;
+            for (auto &existing : _userWords) {
+                if (existing.code == code && existing.word == word) {
+                    isDuplicate = true;
+                    hadDuplicates = true;
+                    // Update count if existing entry has lower count
+                    if (existing.count < count) {
+                        existing.count = count;
+                    }
+                    _log("[IME] Duplicate entry found: %s %s, merging...\n", code.c_str(), word.c_str());
+                    break;
+                }
+            }
+
+            // Only add if not duplicate
+            if (!isDuplicate) {
+                _userWords.push_back({code, word, count});
+            }
+        }
     }
     f.close();
+
+    // If we found duplicates, save the cleaned-up version
+    if (hadDuplicates) {
+        _log("[IME] Cleaning up duplicate entries in user dictionary\n");
+        _userDirty = true;
+        saveUserDict();
+    }
+
     if (_userWords.size() > 0)
         _log("[IME] loaded %d user words\n", (int)_userWords.size());
 }
