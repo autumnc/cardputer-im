@@ -369,6 +369,7 @@ void IME::reset()
 {
     // Clear composition state but minimize memory fragmentation
     _code = "";
+    _displayCodeDirty = true;  // Mark cache as dirty
 
     // Preserve reasonable capacity to avoid reallocation on next lookup.
     // Only shrink excessively large vectors to reduce memory fragmentation.
@@ -984,11 +985,13 @@ bool IME::commit(int idx, String &out)
         if (_remainder.length() == 0 || _remainder.length() >= (int)_code.length())
         {
             _prefix = "";
+            _displayCodeDirty = true;
             _remainder = "";
             reset();
             return true;
         }
         _prefix += out;
+        _displayCodeDirty = true;
         _code = _remainder;
         _remainder = "";
         _partialStart = 0;
@@ -1001,6 +1004,7 @@ bool IME::commit(int idx, String &out)
     if (_prefix.length() > 0)
     {
         _prefix += out;
+        _displayCodeDirty = true;
         addUserWord(_codeOrig, _prefix);
         bumpFrequency(_codeOrig, _prefix);
         out = _prefix;
@@ -1011,6 +1015,7 @@ bool IME::commit(int idx, String &out)
         bumpFrequency(_code, out);
     }
     _prefix = "";
+    _displayCodeDirty = true;
     _codeOrig = "";
     reset();
     return true;
@@ -1029,6 +1034,7 @@ bool IME::handleKey(int key, String &out)
         {
             _predicting = false;
             _code = (char)tolower(key);
+            _displayCodeDirty = true;
             lookup();
             return true;
         }
@@ -1112,6 +1118,7 @@ bool IME::handleKey(int key, String &out)
         if ((int)_code.length() < _maxCode)
         {
             _code += c;
+            _displayCodeDirty = true;
             lookup();
         }
         return true;
@@ -1154,6 +1161,7 @@ bool IME::handleKey(int key, String &out)
         if (_code.length() > 0)
         {
             _code.remove(_code.length() - 1);
+            _displayCodeDirty = true;
             if (_code.length() == 0)
                 reset();
             else

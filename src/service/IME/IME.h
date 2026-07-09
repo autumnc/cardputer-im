@@ -44,13 +44,14 @@ public:
     bool handleKey(int key, String &out);
 
     // Display code: selected hanzi + remaining pinyin (逐字 composing)
-    // Returns by value for thread safety; caller should cache if called frequently
+    // Uses caching to avoid frequent String allocations
     String displayCode() const {
-        String result;
-        result.reserve(_prefix.length() + _code.length());
-        result = _prefix;
-        result += _code;
-        return result;
+        // Update cache only when dirty
+        if (_displayCodeDirty) {
+            _displayCodeCache = _prefix + _code;
+            _displayCodeDirty = false;
+        }
+        return _displayCodeCache;
     }
     // Current composition (the typed Wubi letters), for the candidate bar.
     const String &composition() const { return _code; }
@@ -191,6 +192,10 @@ private:
     std::vector<String> _page;      // candidates on the current page
     int _pageStart = 0;             // index into _all of the first page entry
     int _pageSize = 9;              // candidates shown / selectable per page
+
+    // Cache for displayCode() to avoid frequent String allocations
+    mutable String _displayCodeCache;
+    mutable bool _displayCodeDirty = true;
 
     void reset();          // clear composition state
     void lookup();         // refresh _all from _code
