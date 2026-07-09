@@ -51,6 +51,12 @@ bool app_ready()
     return _ready;
 }
 
+// Setter for _ready flag (used by display init for error handling)
+void set_app_ready(bool val)
+{
+    _ready = val;
+}
+
 // USB-drive (export) mode flag, latched at boot (see app_setup).
 bool _usbDrive = false;
 
@@ -128,11 +134,14 @@ void app_setup()
     extern void *wifi_scan_reserve;
     wifi_scan_reserve = heap_caps_malloc(32768, MALLOC_CAP_DMA);
     if (!wifi_scan_reserve) {
-        _log("Failed to allocate DMA buffer for WiFi\n");
+        _log("WARNING: WiFi DMA buffer allocation failed - WiFi features disabled\n");
         JsonDocument &app = status();
-        app["error"] = "Memory allocation failed.\nCannot use WiFi features.";
-        app["screen"] = ERRORSCREEN;
-        // Continue without WiFi capability - device still usable for basic editing
+        app["wifi_available"] = false;  // Mark WiFi as unavailable
+        // Don't set ERRORSCREEN - device can still function as text editor
+        // User will see WiFi disabled in menu
+    } else {
+        JsonDocument &app = status();
+        app["wifi_available"] = true;  // WiFi is available
     }
 #endif
 

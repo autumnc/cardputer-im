@@ -101,8 +101,14 @@ public:
     bool backSpacePressed = false;
 
     //
-    int getBufferSize() { return strlen(buffer); }
-    void resetBuffer() { memset(buffer, '\0', sizeof(buffer)); }
+    int getBufferSize() {
+        Lock guard(*this);  // Protect buffer access on multi-core systems
+        return strlen(buffer);
+    }
+    void resetBuffer() {
+        Lock guard(*this);  // Protect buffer modification on multi-core systems
+        memset(buffer, '\0', sizeof(buffer));
+    }
 
     //
     void addChar(int c);

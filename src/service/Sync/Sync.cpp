@@ -69,6 +69,16 @@ void sync_start()
     //
     _log("[sync_start] Sync Start\n");
 
+    // Check if WiFi is available (DMA buffer was allocated at boot)
+    bool wifiAvailable = app["wifi_available"].as<bool>();
+    if (!wifiAvailable) {
+        app["sync_error"] = "WiFi not available.\nMemory allocation failed at boot.\nTry rebooting device.";
+        app["sync_state"] = SYNC_ERROR;
+        app["clear"] = true;
+        _log("[sync_start] WiFi unavailable - DMA buffer allocation failed\n");
+        return;
+    }
+
     //
     app["sync_state"] = SYNC_STARTED;
     app["sync_message"] = "Connecting to WiFi";

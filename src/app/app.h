@@ -19,6 +19,9 @@ void app_loop();
 // is app ready?
 bool app_ready();
 
+// Set app ready state (used by display init for error handling)
+void set_app_ready(bool val);
+
 // True when the device booted into USB-drive (export) mode ('e' held at
 // power-on). In this mode the SD is owned by the USB host, so the normal
 // editor + USB-host keyboard must NOT be started.

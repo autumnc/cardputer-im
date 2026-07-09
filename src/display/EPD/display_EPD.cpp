@@ -57,15 +57,29 @@ void display_EPD_setup()
     framebuffer = (uint8_t *)ps_calloc(sizeof(uint8_t), EPD_WIDTH * EPD_HEIGHT / 2);
     if (!framebuffer)
     {
-        Serial.println("alloc memory failed !!!");
-        while (1)
-            ;
+        _log("CRITICAL: EPD framebuffer allocation failed! (%d x %d / 2 bytes)\n",
+             EPD_WIDTH, EPD_HEIGHT);
+
+        // Set error message and screen - allow user to see the error
+        JsonDocument &app = status();
+        app["error"] = "Display memory allocation failed.\nDevice may need reboot.\nCheck PSRAM availability.";
+        app["screen"] = ERRORSCREEN;
+
+        // Mark app as ready so error screen can be displayed
+        // (app_setup checks filesystem before calling display_EPD_setup)
+        extern bool _ready;
+        extern void set_app_ready(bool val);
+        set_app_ready(true);
+
+        // Return gracefully - don't deadlock in while(1) loop
+        // User will see error message and can reboot device
+        return;
     }
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
     // Initialize EPD Screen
     epd_init();
-    _log("E-ink display initialized\n");
+    _log("E-ink display initialized successfully\n");
 }
 
 //
