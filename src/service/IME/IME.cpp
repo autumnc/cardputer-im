@@ -497,13 +497,26 @@ void IME::lookup()
     // 删除模式: code starting with 'v' → only match user dict, delete on select
     if (_deleteMode)
     {
-        // 只匹配用户词库
+        // 只匹配用户词库,按word去重(不同code可能有相同word)
         std::vector< std::pair<int, String> > userMatches;
         for (auto &p : _userWords) {
             // 如果code为空,显示所有用户词条;否则前缀匹配
             if (qlen == 0 ||
                 (p.code.length() >= qlen && strncmp(p.code.c_str(), q, qlen) == 0)) {
-                userMatches.push_back({p.count, p.word});
+                // 检查是否已有相同word,如有则更新count为较大值
+                bool found = false;
+                for (auto &m : userMatches) {
+                    if (m.second == p.word) {
+                        found = true;
+                        if (m.first < p.count) {
+                            m.first = p.count;
+                        }
+                        break;
+                    }
+                }
+                if (!found) {
+                    userMatches.push_back({p.count, p.word});
+                }
             }
         }
 
@@ -529,11 +542,25 @@ void IME::lookup()
 
     // 阶段1: 用户词库匹配 (最高优先级)
     // ----------------------------------------
+    // 按word去重:不同code可能有相同word,只保留最高频次
     std::vector< std::pair<int, String> > userFreq;
     for (auto &p : _userWords) {
         if (p.code.length() < qlen) continue;
         if (strncmp(p.code.c_str(), q, qlen) == 0) {
-            userFreq.push_back({p.count, p.word});
+            // 检查是否已有相同word,如有则更新count为较大值
+            bool found = false;
+            for (auto &uf : userFreq) {
+                if (uf.second == p.word) {
+                    found = true;
+                    if (uf.first < p.count) {
+                        uf.first = p.count;
+                    }
+                    break;
+                }
+            }
+            if (!found) {
+                userFreq.push_back({p.count, p.word});
+            }
         }
     }
     // 按频次降序排序
