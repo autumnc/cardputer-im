@@ -566,6 +566,9 @@ void IME::lookup()
             size_t wpos = wlo;
             int safety = 0;
             while (wpos < whi && _all.size() < 100 && safety++ < 5000) {
+                // Yield CPU every 1000 iterations to prevent blocking
+                if (safety % 1000 == 0) yield();
+
                 uint8_t cl = _wordData[wpos];
                 if (cl == 0 || wpos + 1 + cl > whi) break;
                 const char *wc = (const char *)_wordData + wpos + 1;
@@ -611,6 +614,9 @@ void IME::lookup()
             size_t spos = slo;
             int safety = 0;
             while (spos < shi && _all.size() < 100 && safety++ < 60000) {
+                // Yield CPU every 5000 iterations to prevent blocking
+                if (safety % 5000 == 0) yield();
+
                 uint8_t cl = _wordData[spos];
                 if (cl == 0 || spos + 1 + cl > shi) break;
                 const char *wc = (const char *)_wordData + spos + 1;
@@ -718,6 +724,9 @@ void IME::lookup()
         size_t spos = slo;
         int safety = 0;
         while (spos < shi && _all.size() < 100 && safety++ < 60000) {
+            // Yield CPU every 5000 iterations to prevent blocking
+            if (safety % 5000 == 0) yield();
+
             uint8_t cl = _wordData[spos];
             if (cl == 0 || spos + 1 + cl > shi) break;
             const char *wc = (const char *)_wordData + spos + 1;

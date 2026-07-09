@@ -18,6 +18,11 @@
 extern const uint8_t u8g2_font_terminus28_tf[];
 extern const uint8_t u8g2_font_term_cjk_28[];
 
+// Autosave delay mechanism to prevent I/O blocking during editing
+static bool _needAutosave = false;
+static unsigned long _lastEditTime = 0;
+const unsigned long AUTOSAVE_DELAY = 3000;  // 3 seconds delay
+
 //
 int screen_width = 240;
 int screen_height = 135;
@@ -806,21 +811,26 @@ void WP_keyboard(int key, bool pressed, int index)
 //
 // Check if text is saved.  Autosave fires after 3 s of idle, but never
 // while the IME candidate bar is visible (composing would be interrupted).
+// Uses async autosave mechanism to prevent I/O blocking during editing.
 void WP_check_saved()
 {
     static unsigned int last = millis();
     static int lastBufferSize = Editor::getInstance().getBufferSize();
     int bufferSize = Editor::getInstance().getBufferSize();
 
+    // Mark need for autosave when buffer changes
     if (lastBufferSize != bufferSize)
     {
         last = millis();
         lastBufferSize = bufferSize;
+        _needAutosave = true;
+        _lastEditTime = millis();
     }
 
-    if (millis() - last > 3000)
+    // Only save after idle period (no edits for AUTOSAVE_DELAY)
+    if (_needAutosave && millis() - _lastEditTime > AUTOSAVE_DELAY)
     {
-        last = millis();
+        _needAutosave = false;  // Clear flag before save
 
 #ifdef USE_IME
         // Don't save while the user is composing - the candidate bar is
