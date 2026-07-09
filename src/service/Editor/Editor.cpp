@@ -150,6 +150,7 @@ void Editor::loadFile(String fileName)
     {
         buffer[bufferSize++] = file.read();
     }
+    _bufferSize = bufferSize;  // Update cached buffer size
     cursorPos = bufferSize;
 
     // this window mirrors [seekPos, seekPos+bufferSize) on disk exactly
@@ -423,6 +424,7 @@ bool Editor::loadWindow(size_t offset, size_t length)
     {
         buffer[bytesRead++] = file.read();
     }
+    _bufferSize = bytesRead;  // Update cached buffer size
 
     file.close();
     delay(100);
@@ -1140,7 +1142,8 @@ void Editor::addChar(int c)
 
         //
         buffer[cursorPos++] = c;
-        buffer[++bufferSize] = '\0';
+        _bufferSize = ++bufferSize;  // Update cached buffer size
+        buffer[bufferSize] = '\0';
 
         _debug("FileBuffer::addChar::cursorPos %d %c\n", cursorPos, c);
     }
@@ -1204,10 +1207,10 @@ void Editor::removeLastChar()
 
         // Null terminate the buffer
         buffer[bufferSize - removeBytes] = 0;
+        _bufferSize = bufferSize - removeBytes;  // Update cached buffer size
         cursorPos = from;
 
-        bufferSize = getBufferSize();
-        _debug("FileBuffer::removeLastChar After cusorPos: %d bufferSize: %d\n", cursorPos, bufferSize);
+        _debug("FileBuffer::removeLastChar After cusorPos: %d bufferSize: %d\n", cursorPos, _bufferSize);
     }
 }
 
@@ -1230,6 +1233,7 @@ void Editor::removeCharAtCursor()
 
         // Decrease buffer size
         bufferSize -= removeBytes;
+        _bufferSize = bufferSize;  // Update cached buffer size
 
         // Null terminate the buffer
         buffer[bufferSize] = '\0';
@@ -1257,14 +1261,16 @@ void Editor::removeLastWord()
     if (start == 0)
     {
         buffer[0] = '\0';
+        _bufferSize = 0;  // Update cached buffer size
     }
     else
     {
         buffer[start] = ' ';
         buffer[start + 1] = '\0';
+        _bufferSize = start + 1;  // Update cached buffer size
     }
 
-    cursorPos = getBufferSize();
+    cursorPos = _bufferSize;
 
     //
     _debug("FileBuffer::removeLastWord %d\n", cursorPos);
@@ -1286,8 +1292,8 @@ static bool editor_is_word_byte(uint8_t b)
 }
 
 // Delete `count` bytes starting at `start`, shifting the tail left. Does not
-// move the cursor. Safe against overrun.
-static void editor_delete_bytes(char *buffer, int start, int count, int bufferSize)
+// move the cursor. Safe against overrun. Updates _bufferSize.
+static void editor_delete_bytes(char *buffer, int start, int count, int bufferSize, int &_bufferSize)
 {
     if (count <= 0 || start < 0 || start >= bufferSize)
         return;
@@ -1295,6 +1301,7 @@ static void editor_delete_bytes(char *buffer, int start, int count, int bufferSi
         count = bufferSize - start;
     memmove(buffer + start, buffer + start + count, bufferSize - start - count);
     buffer[bufferSize - count] = '\0';
+    _bufferSize = bufferSize - count;  // Update cached buffer size
 }
 
 void Editor::moveWordForward()
@@ -1343,13 +1350,13 @@ void Editor::killToEndOfLine()
         killed.reserve(eol - cursorPos + 1);
         for (int i = cursorPos; i < eol; i++)
             killed += buffer[i];
-        editor_delete_bytes(buffer, cursorPos, eol - cursorPos, size);
+        editor_delete_bytes(buffer, cursorPos, eol - cursorPos, size, _bufferSize);
     }
     else
     {
         // already at end of line: kill the newline itself (join next line up)
         killed += '\n';
-        editor_delete_bytes(buffer, cursorPos, 1, size);
+        editor_delete_bytes(buffer, cursorPos, 1, size, _bufferSize);
     }
 
     // consecutive C-k presses accumulate into the kill buffer (Emacs behavior)
@@ -1382,7 +1389,7 @@ void Editor::killWordForward()
     killed.reserve(count + 1);
     for (int i = cursorPos; i < p; i++)
         killed += buffer[i];
-    editor_delete_bytes(buffer, cursorPos, count, size);
+    editor_delete_bytes(buffer, cursorPos, count, size, _bufferSize);
 
     if (lastActionWasKill)
         killBuffer += killed;

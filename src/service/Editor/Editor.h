@@ -24,6 +24,9 @@ public:
     // Text Buffer
     char buffer[BUFFER_SIZE + 100];
 
+    // Cached buffer length to avoid O(n) strlen() calls
+    int _bufferSize = 0;
+
     // Saved Status
     bool saved = true;
 
@@ -103,11 +106,12 @@ public:
     //
     int getBufferSize() {
         Lock guard(*this);  // Protect buffer access on multi-core systems
-        return strlen(buffer);
+        return _bufferSize;  // Return cached value (O(1))
     }
     void resetBuffer() {
         Lock guard(*this);  // Protect buffer modification on multi-core systems
         memset(buffer, '\0', sizeof(buffer));
+        _bufferSize = 0;  // Reset cached size
     }
 
     //
