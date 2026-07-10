@@ -537,53 +537,48 @@ void IME::lookup()
     }
 
     // ========================================
-    // 新的5级匹配优先级 (严格按序执行)
+    // 7级匹配优先级 (严格按序执行)
     // ========================================
 
-    // 阶段1: 用户词库匹配 (最高优先级)
-    // ----------------------------------------
-    // 按word去重:不同code可能有相同word,只保留最高频次
-    std::vector< std::pair<int, String> > userFreq;
-    for (auto &p : _userWords) {
-        if (p.code.length() < qlen) continue;
-        if (strncmp(p.code.c_str(), q, qlen) == 0) {
-            // 检查是否已有相同word,如有则更新count为较大值
+    // // // // // // // // // // // // // // // // // // // // // //
+    // 阶段1: 用户词库单字匹配
+    // // // // // // // // // // // // // // // // // // // // // //
+    {
+        std::vector< std::pair<int, String> > userSingleFreq;
+        for (auto &p : _userWords) {
+            if (p.word.length() != 3) continue;           // 只匹配单字
+            if (p.code.length() < qlen) continue;         // 前缀匹配
+            if (strncmp(p.code.c_str(), q, qlen) != 0) continue;
             bool found = false;
-            for (auto &uf : userFreq) {
+            for (auto &uf : userSingleFreq) {
                 if (uf.second == p.word) {
                     found = true;
-                    if (uf.first < p.count) {
-                        uf.first = p.count;
-                    }
+                    if (uf.first < p.count) uf.first = p.count;
                     break;
                 }
             }
-            if (!found) {
-                userFreq.push_back({p.count, p.word});
-            }
+            if (!found) userSingleFreq.push_back({p.count, p.word});
         }
+        std::sort(userSingleFreq.begin(), userSingleFreq.end(),
+            [](const std::pair<int,String> &a, const std::pair<int,String> &b) {
+                return a.first > b.first;
+            });
+        for (auto &f : userSingleFreq) {
+            _all.push_back(f.second);
+            if (_all.size() >= 100) break;
+        }
+        if (_all.size() >= 100) { buildPage(); return; }
     }
-    // 按频次降序排序
-    std::sort(userFreq.begin(), userFreq.end(),
-        [](const std::pair<int,String> &a, const std::pair<int,String> &b) {
-            return a.first > b.first;
-        });
-    for (auto &f : userFreq) {
-        _all.push_back(f.second);
-        if (_all.size() >= 100) break;
-    }
-    if (_all.size() >= 100) { buildPage(); return; }
 
-    // 阶段2: 精确匹配 (完整拼音)
-    // ----------------------------------------
-    // 检测输入是否包含元音(区分精确匹配和简拼)
+    // // // // // // // // // // // // // // // // // // // // // //
+    // 阶段2: 单字精确匹配 (字典)
+    // // // // // // // // // // // // // // // // // // // // // //
     bool hasVowel = false;
     for (int i = 0; i < qlen; i++) {
         if (strchr("aeiouv", q[i])) { hasVowel = true; break; }
     }
 
     if (hasVowel) {
-        // 精确匹配: 单字
         uint32_t lo, hi;
         searchWindow(q, qlen, lo, hi);
         uint32_t scanEnd = hi;
@@ -608,171 +603,152 @@ void IME::lookup()
                 if ((int)strlen(code) > _maxMatchLen) _maxMatchLen = strlen(code);
             }
         }
-
-        // 精确匹配: 词组 (完整拼音匹配)
-        if (_wordCount > 0 && _wordData) {
-            size_t wlo = 0, whi = _wordDataSize;
-            if (qlen >= 2) {
-                int k = (q[0] - 'a') * 26 + (q[1] - 'a');
-                if (k >= 0 && k < INDEX_ENTRIES) {
-                    wlo = _wordIndex[k];
-                    whi = (k + 1 < INDEX_ENTRIES) ? _wordIndex[k + 1] : _wordDataSize;
-                }
-            }
-            size_t wpos = wlo;
-            int safety = 0;
-            while (wpos < whi && _all.size() < 100 && safety++ < 5000) {
-                // Yield CPU every 1000 iterations to prevent blocking
-                if (safety % 1000 == 0) yield();
-
-                uint8_t cl = _wordData[wpos];
-                if (cl == 0 || wpos + 1 + cl > whi) break;
-                const char *wc = (const char *)_wordData + wpos + 1;
-                wpos += 1 + cl;
-                if (wpos >= whi) break;
-                uint8_t n = _wordData[wpos++];
-                // 精确匹配: code必须完全相等
-                if ((int)cl == qlen && strncmp(wc, q, qlen) == 0) {
-                    for (uint8_t j = 0; j < n && wpos < whi; j++) {
-                        uint8_t wl = _wordData[wpos++];
-                        if (wl == 0 || wpos + wl > whi) break;
-                        String w;
-                        w.concat((const char *)_wordData + wpos, wl);
-                        wpos += wl;
-                        bool dup = false;
-                        for (auto &e : _all) if (e == w) { dup = true; break; }
-                        if (!dup) {
-                            _all.push_back(w);
-                            if ((int)cl > _maxMatchLen) _maxMatchLen = cl;
-                        }
-                    }
-                } else {
-                    for (uint8_t j = 0; j < n && wpos < whi; j++) {
-                        uint8_t wl = _wordData[wpos++];
-                        if (wpos + wl > whi) break;
-                        wpos += wl;
-                    }
-                }
-            }
-        }
     }
-    else {
-        // 阶段3: 简拼匹配 (纯辅音输入,无元音)
-        // ----------------------------------------
-        if (_wordCount > 0 && _wordData) {
-            size_t slo = 0, shi = _wordDataSize;
-            if (qlen >= 1 && q[0] >= 'a' && q[0] <= 'z') {
-                int k = (q[0] - 'a') * 26;
-                slo = _wordIndex[k];
-                shi = (k + 26 < INDEX_ENTRIES) ? _wordIndex[k + 26] : _wordDataSize;
-            }
+    if (_all.size() >= 100) { buildPage(); return; }
 
-            size_t spos = slo;
-            int safety = 0;
-            while (spos < shi && _all.size() < 100 && safety++ < 60000) {
-                // Yield CPU every 5000 iterations to prevent blocking
-                if (safety % 5000 == 0) yield();
-
-                uint8_t cl = _wordData[spos];
-                if (cl == 0 || spos + 1 + cl > shi) break;
-                const char *wc = (const char *)_wordData + spos + 1;
-                spos += 1 + cl;
-                if (spos >= shi) break;
-                uint8_t n = _wordData[spos++];
-
-                // 提取简拼声母
-                char init[13]; int o = 0;
-                for (int i = 0; i < cl && o < 12; ) {
-                    if (strchr("aeiouv", wc[i])) {
-                        while (i < cl && strchr("aeiouvngr", wc[i]) && o < 12)
-                            init[o++] = wc[i++];
-                        continue;
-                    }
-                    if (i+1 < cl && (wc[i]=='z'||wc[i]=='c'||wc[i]=='s') && wc[i+1]=='h') {
-                        init[o++] = wc[i];
-                        init[o++] = wc[i+1];
-                        i += 2;
-                    } else {
-                        init[o++] = wc[i];
-                        i++;
-                    }
-                    while (i < cl && strchr("aeiouv", wc[i])) i++;
-                    if (i < cl && strchr("ngr", wc[i])) {
-                        int j = i;
-                        while (j < cl && strchr("ngr", wc[j])) j++;
-                        if (j >= cl || !strchr("aeiouv", wc[j])) i = j;
-                    }
-                }
-                init[o] = 0;
-
-                // 匹配简拼
-                if (o >= qlen && strncmp(init, q, qlen) == 0) {
-                    for (uint8_t j = 0; j < n && spos < shi; j++) {
-                        uint8_t wl = _wordData[spos++];
-                        if (wl == 0 || spos + wl > shi) break;
-                        if (_all.size() < 100) {
-                            String w;
-                            w.concat((const char *)_wordData + spos, wl);
-                            bool dup = false;
-                            for (auto &e : _all) if (e == w) { dup = true; break; }
-                            if (!dup) {
-                                _all.push_back(w);
-                                if ((int)cl > _maxMatchLen) _maxMatchLen = cl;
-                            }
-                        }
-                        spos += wl;
-                    }
-                } else {
-                    for (uint8_t j = 0; j < n && spos < shi; j++) {
-                        uint8_t wl = _wordData[spos++];
-                        if (spos + wl > shi) break;
-                        spos += wl;
-                    }
-                }
-            }
-        }
-    }
-
-    // 阶段4: 简拼+后字匹配 (简拼+完整拼音)
-    // ----------------------------------------
-    // 检测是否为"简拼+后字"模式: 输入以元音结尾,但开头部分是辅音
-    // 例如: zhguo, zgua, xguo 等
-    bool shorthandTail = false;
-    String typedInit;   // 简拼部分
-    String typedTail;   // 后字完整拼音
-
-    if (qlen >= 3 && hasVowel) {
-        // 从后往前找最后一个音节的开始位置
-        int lastSylStart = qlen;
-        for (int i = qlen - 1; i >= 1; i--) {
-            if (strchr("aeiouv", q[i])) {
-                int j = i;
-                while (j > 0 && strchr("aeiouv", q[j-1])) j--;
-                if (j > 0 && strchr("bcdfghjklmnpqrstwxyz", q[j-1])) {
-                    lastSylStart = j;
+    // // // // // // // // // // // // // // // // // // // // // //
+    // 阶段3: 用户词库词组匹配
+    // // // // // // // // // // // // // // // // // // // // // //
+    {
+        std::vector< std::pair<int, String> > userWordFreq;
+        for (auto &p : _userWords) {
+            if (p.word.length() <= 3) continue;           // 只匹配词组
+            if (p.code.length() < qlen) continue;         // 前缀匹配
+            if (strncmp(p.code.c_str(), q, qlen) != 0) continue;
+            bool found = false;
+            for (auto &uf : userWordFreq) {
+                if (uf.second == p.word) {
+                    found = true;
+                    if (uf.first < p.count) uf.first = p.count;
                     break;
                 }
             }
+            if (!found) userWordFreq.push_back({p.count, p.word});
         }
+        std::sort(userWordFreq.begin(), userWordFreq.end(),
+            [](const std::pair<int,String> &a, const std::pair<int,String> &b) {
+                return a.first > b.first;
+            });
+        for (auto &f : userWordFreq) {
+            _all.push_back(f.second);
+            if (_all.size() >= 100) break;
+        }
+        if (_all.size() >= 100) { buildPage(); return; }
+    }
 
-        // 验证前半部分是否为纯辅音(简拼)
-        if (lastSylStart >= 2 && lastSylStart < qlen) {
-            bool isPureConsonant = true;
-            for (int i = 0; i < lastSylStart; i++) {
-                if (strchr("aeiouv", q[i])) { isPureConsonant = false; break; }
+    // // // // // // // // // // // // // // // // // // // // // //
+    // 阶段4: 词组精确匹配 (字典)
+    // // // // // // // // // // // // // // // // // // // // // //
+    if (hasVowel && _wordCount > 0 && _wordData) {
+        size_t wlo = 0, whi = _wordDataSize;
+        if (qlen >= 2) {
+            int k = (q[0] - 'a') * 26 + (q[1] - 'a');
+            if (k >= 0 && k < INDEX_ENTRIES) {
+                wlo = _wordIndex[k];
+                whi = (k + 1 < INDEX_ENTRIES) ? _wordIndex[k + 1] : _wordDataSize;
             }
-            if (isPureConsonant) {
-                shorthandTail = true;
-                typedInit = String(q, lastSylStart);
-                typedTail = String(q + lastSylStart, qlen - lastSylStart);
+        }
+        size_t wpos = wlo;
+        int safety = 0;
+        while (wpos < whi && _all.size() < 100 && safety++ < 5000) {
+            // Yield CPU every 1000 iterations to prevent blocking
+            if (safety % 1000 == 0) yield();
+
+            uint8_t cl = _wordData[wpos];
+            if (cl == 0 || wpos + 1 + cl > whi) break;
+            const char *wc = (const char *)_wordData + wpos + 1;
+            wpos += 1 + cl;
+            if (wpos >= whi) break;
+            uint8_t n = _wordData[wpos++];
+            // 精确匹配: code必须完全相等
+            if ((int)cl == qlen && strncmp(wc, q, qlen) == 0) {
+                for (uint8_t j = 0; j < n && wpos < whi; j++) {
+                    uint8_t wl = _wordData[wpos++];
+                    if (wl == 0 || wpos + wl > whi) break;
+                    String w;
+                    w.concat((const char *)_wordData + wpos, wl);
+                    wpos += wl;
+                    bool dup = false;
+                    for (auto &e : _all) if (e == w) { dup = true; break; }
+                    if (!dup) {
+                        _all.push_back(w);
+                        if ((int)cl > _maxMatchLen) _maxMatchLen = cl;
+                    }
+                }
+            } else {
+                for (uint8_t j = 0; j < n && wpos < whi; j++) {
+                    uint8_t wl = _wordData[wpos++];
+                    if (wpos + wl > whi) break;
+                    wpos += wl;
+                }
             }
         }
     }
+    if (_all.size() >= 100) { buildPage(); return; }
 
-    if (shorthandTail && _wordCount > 0 && _wordData && _all.size() < 100) {
+    // // // // // // // // // // // // // // // // // // // // // //
+    // 阶段5: 用户词库简拼匹配
+    // // // // // // // // // // // // // // // // // // // // // //
+    if (!hasVowel && _userWords.size() > 0) {
+        std::vector< std::pair<int, String> > userInitFreq;
+        for (auto &p : _userWords) {
+            int cl = p.code.length();
+            if (cl < 2) continue;
+            const char *wc = p.code.c_str();
+            char init[13]; int o = 0;
+            for (int i = 0; i < cl && o < 12; ) {
+                if (strchr("aeiouv", wc[i])) {
+                    while (i < cl && strchr("aeiouvngr", wc[i]) && o < 12)
+                        init[o++] = wc[i++];
+                    continue;
+                }
+                if (i+1 < cl && (wc[i]=='z'||wc[i]=='c'||wc[i]=='s') && wc[i+1]=='h') {
+                    init[o++] = wc[i];
+                    init[o++] = wc[i+1];
+                    i += 2;
+                } else {
+                    init[o++] = wc[i];
+                    i++;
+                }
+                while (i < cl && strchr("aeiouv", wc[i])) i++;
+                if (i < cl && strchr("ngr", wc[i])) {
+                    int j = i;
+                    while (j < cl && strchr("ngr", wc[j])) j++;
+                    if (j >= cl || !strchr("aeiouv", wc[j])) i = j;
+                }
+            }
+            init[o] = 0;
+
+            if (o >= qlen && strncmp(init, q, qlen) == 0) {
+                bool found = false;
+                for (auto &uf : userInitFreq) {
+                    if (uf.second == p.word) {
+                        found = true;
+                        if (uf.first < p.count) uf.first = p.count;
+                        break;
+                    }
+                }
+                if (!found) userInitFreq.push_back({p.count, p.word});
+            }
+        }
+        std::sort(userInitFreq.begin(), userInitFreq.end(),
+            [](const std::pair<int,String> &a, const std::pair<int,String> &b) {
+                return a.first > b.first;
+            });
+        for (auto &f : userInitFreq) {
+            _all.push_back(f.second);
+            if (_all.size() >= 100) break;
+        }
+        if (_all.size() >= 100) { buildPage(); return; }
+    }
+
+    // // // // // // // // // // // // // // // // // // // // // //
+    // 阶段6: 简拼匹配 (纯辅音输入,无元音)
+    // // // // // // // // // // // // // // // // // // // // // //
+    if (!hasVowel && _wordCount > 0 && _wordData) {
         size_t slo = 0, shi = _wordDataSize;
-        if (typedInit.length() >= 1 && typedInit[0] >= 'a' && typedInit[0] <= 'z') {
-            int k = (typedInit[0] - 'a') * 26;
+        if (qlen >= 1 && q[0] >= 'a' && q[0] <= 'z') {
+            int k = (q[0] - 'a') * 26;
             slo = _wordIndex[k];
             shi = (k + 26 < INDEX_ENTRIES) ? _wordIndex[k + 26] : _wordDataSize;
         }
@@ -815,66 +791,179 @@ void IME::lookup()
             }
             init[o] = 0;
 
-            // 检查简拼是否匹配
-            if (o < (int)typedInit.length() || strncmp(init, typedInit.c_str(), typedInit.length()) != 0) {
+            // 匹配简拼
+            if (o >= qlen && strncmp(init, q, qlen) == 0) {
                 for (uint8_t j = 0; j < n && spos < shi; j++) {
                     uint8_t wl = _wordData[spos++];
-                    if (spos + wl > shi) break;
-                    spos += wl;
-                }
-                continue;
-            }
-
-            // 提取最后一个音节
-            int lastSylStart = cl;
-            for (int i = cl - 1; i >= 0; i--) {
-                if (strchr("aeiouv", wc[i])) {
-                    int j = i;
-                    while (j > 0 && strchr("aeiouv", wc[j-1])) j--;
-                    if (j > 0) { lastSylStart = j; break; }
-                }
-            }
-
-            // 检查后字是否匹配
-            const char *candTailStart = wc + lastSylStart;
-            int candTailLen = cl - lastSylStart;
-            bool tailMatch = false;
-            if (candTailLen >= (int)typedTail.length()) {
-                tailMatch = (strncmp(candTailStart, typedTail.c_str(), typedTail.length()) == 0);
-            } else {
-                tailMatch = (strncmp(typedTail.c_str(), candTailStart, candTailLen) == 0);
-            }
-
-            if (!tailMatch) {
-                for (uint8_t j = 0; j < n && spos < shi; j++) {
-                    uint8_t wl = _wordData[spos++];
-                    if (spos + wl > shi) break;
-                    spos += wl;
-                }
-                continue;
-            }
-
-            // 匹配成功,添加候选词
-            for (uint8_t j = 0; j < n && spos < shi; j++) {
-                uint8_t wl = _wordData[spos++];
-                if (wl == 0 || spos + wl > shi) break;
-                if (_all.size() < 100) {
-                    String w;
-                    w.concat((const char *)_wordData + spos, wl);
-                    bool dup = false;
-                    for (auto &e : _all) if (e == w) { dup = true; break; }
-                    if (!dup) {
-                        _all.push_back(w);
-                        if ((int)cl > _maxMatchLen) _maxMatchLen = cl;
+                    if (wl == 0 || spos + wl > shi) break;
+                    if (_all.size() < 100) {
+                        String w;
+                        w.concat((const char *)_wordData + spos, wl);
+                        bool dup = false;
+                        for (auto &e : _all) if (e == w) { dup = true; break; }
+                        if (!dup) {
+                            _all.push_back(w);
+                            if ((int)cl > _maxMatchLen) _maxMatchLen = cl;
+                        }
                     }
+                    spos += wl;
                 }
-                spos += wl;
+            } else {
+                for (uint8_t j = 0; j < n && spos < shi; j++) {
+                    uint8_t wl = _wordData[spos++];
+                    if (spos + wl > shi) break;
+                    spos += wl;
+                }
             }
         }
     }
 
-    // 阶段5: 逐字匹配 (前缀匹配,最后兜底)
-    // ----------------------------------------
+    // // // // // // // // // // // // // // // // // // // // // //
+    // 阶段7: 简拼+后字匹配 (简拼+完整拼音)
+    // // // // // // // // // // // // // // // // // // // // // //
+    {
+        // 检测是否为"简拼+后字"模式: 输入以元音结尾,但开头部分是辅音
+        // 例如: zhguo, zgua, xguo 等
+        bool shorthandTail = false;
+        String typedInit;   // 简拼部分
+        String typedTail;   // 后字完整拼音
+
+        if (qlen >= 3 && hasVowel) {
+            // 从后往前找最后一个音节的开始位置
+            int lastSylStart = qlen;
+            for (int i = qlen - 1; i >= 1; i--) {
+                if (strchr("aeiouv", q[i])) {
+                    int j = i;
+                    while (j > 0 && strchr("aeiouv", q[j-1])) j--;
+                    if (j > 0 && strchr("bcdfghjklmnpqrstwxyz", q[j-1])) {
+                        lastSylStart = j;
+                        break;
+                    }
+                }
+            }
+
+            // 验证前半部分是否为纯辅音(简拼)
+            if (lastSylStart >= 2 && lastSylStart < qlen) {
+                bool isPureConsonant = true;
+                for (int i = 0; i < lastSylStart; i++) {
+                    if (strchr("aeiouv", q[i])) { isPureConsonant = false; break; }
+                }
+                if (isPureConsonant) {
+                    shorthandTail = true;
+                    typedInit = String(q, lastSylStart);
+                    typedTail = String(q + lastSylStart, qlen - lastSylStart);
+                }
+            }
+        }
+
+        if (shorthandTail && _wordCount > 0 && _wordData && _all.size() < 100) {
+            size_t slo = 0, shi = _wordDataSize;
+            if (typedInit.length() >= 1 && typedInit[0] >= 'a' && typedInit[0] <= 'z') {
+                int k = (typedInit[0] - 'a') * 26;
+                slo = _wordIndex[k];
+                shi = (k + 26 < INDEX_ENTRIES) ? _wordIndex[k + 26] : _wordDataSize;
+            }
+
+            size_t spos = slo;
+            int safety = 0;
+            while (spos < shi && _all.size() < 100 && safety++ < 60000) {
+                // Yield CPU every 5000 iterations to prevent blocking
+                if (safety % 5000 == 0) yield();
+
+                uint8_t cl = _wordData[spos];
+                if (cl == 0 || spos + 1 + cl > shi) break;
+                const char *wc = (const char *)_wordData + spos + 1;
+                spos += 1 + cl;
+                if (spos >= shi) break;
+                uint8_t n = _wordData[spos++];
+
+                // 提取简拼声母
+                char init[13]; int o = 0;
+                for (int i = 0; i < cl && o < 12; ) {
+                    if (strchr("aeiouv", wc[i])) {
+                        while (i < cl && strchr("aeiouvngr", wc[i]) && o < 12)
+                            init[o++] = wc[i++];
+                        continue;
+                    }
+                    if (i+1 < cl && (wc[i]=='z'||wc[i]=='c'||wc[i]=='s') && wc[i+1]=='h') {
+                        init[o++] = wc[i];
+                        init[o++] = wc[i+1];
+                        i += 2;
+                    } else {
+                        init[o++] = wc[i];
+                        i++;
+                    }
+                    while (i < cl && strchr("aeiouv", wc[i])) i++;
+                    if (i < cl && strchr("ngr", wc[i])) {
+                        int j = i;
+                        while (j < cl && strchr("ngr", wc[j])) j++;
+                        if (j >= cl || !strchr("aeiouv", wc[j])) i = j;
+                    }
+                }
+                init[o] = 0;
+
+                // 检查简拼是否匹配
+                if (o < (int)typedInit.length() || strncmp(init, typedInit.c_str(), typedInit.length()) != 0) {
+                    for (uint8_t j = 0; j < n && spos < shi; j++) {
+                        uint8_t wl = _wordData[spos++];
+                        if (spos + wl > shi) break;
+                        spos += wl;
+                    }
+                    continue;
+                }
+
+                // 提取最后一个音节
+                int lastSylStart = cl;
+                for (int i = cl - 1; i >= 0; i--) {
+                    if (strchr("aeiouv", wc[i])) {
+                        int j = i;
+                        while (j > 0 && strchr("aeiouv", wc[j-1])) j--;
+                        if (j > 0) { lastSylStart = j; break; }
+                    }
+                }
+
+                // 检查后字是否匹配
+                const char *candTailStart = wc + lastSylStart;
+                int candTailLen = cl - lastSylStart;
+                bool tailMatch = false;
+                if (candTailLen >= (int)typedTail.length()) {
+                    tailMatch = (strncmp(candTailStart, typedTail.c_str(), typedTail.length()) == 0);
+                } else {
+                    tailMatch = (strncmp(typedTail.c_str(), candTailStart, candTailLen) == 0);
+                }
+
+                if (!tailMatch) {
+                    for (uint8_t j = 0; j < n && spos < shi; j++) {
+                        uint8_t wl = _wordData[spos++];
+                        if (spos + wl > shi) break;
+                        spos += wl;
+                    }
+                    continue;
+                }
+
+                // 匹配成功,添加候选词
+                for (uint8_t j = 0; j < n && spos < shi; j++) {
+                    uint8_t wl = _wordData[spos++];
+                    if (wl == 0 || spos + wl > shi) break;
+                    if (_all.size() < 100) {
+                        String w;
+                        w.concat((const char *)_wordData + spos, wl);
+                        bool dup = false;
+                        for (auto &e : _all) if (e == w) { dup = true; break; }
+                        if (!dup) {
+                            _all.push_back(w);
+                            if ((int)cl > _maxMatchLen) _maxMatchLen = cl;
+                        }
+                    }
+                    spos += wl;
+                }
+            }
+        }
+    }
+
+    // // // // // // // // // // // // // // // // // // // // // //
+    // 阶段8: 逐字匹配 (前缀匹配,最后兜底)
+    // // // // // // // // // // // // // // // // // // // // // //
     _partialStart = _all.size();
     _remainder = "";
     if (qlen > 1 && _all.size() < 100) {
