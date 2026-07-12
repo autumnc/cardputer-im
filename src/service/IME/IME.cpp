@@ -637,7 +637,7 @@ void IME::lookup()
     }
 
     // // // // // // // // // // // // // // // // // // // // // //
-    // 阶段4: 词组精确匹配 (字典)
+    // 阶段4: 词组前缀匹配 (字典)
     // // // // // // // // // // // // // // // // // // // // // //
     if (hasVowel && _wordCount > 0 && _wordData) {
         size_t wlo = 0, whi = _wordDataSize;
@@ -660,8 +660,8 @@ void IME::lookup()
             wpos += 1 + cl;
             if (wpos >= whi) break;
             uint8_t n = _wordData[wpos++];
-            // 精确匹配: code必须完全相等
-            if ((int)cl == qlen && strncmp(wc, q, qlen) == 0) {
+            // 前缀匹配: code以输入开头即可
+            if ((int)cl >= qlen && strncmp(wc, q, qlen) == 0) {
                 for (uint8_t j = 0; j < n && wpos < whi; j++) {
                     uint8_t wl = _wordData[wpos++];
                     if (wl == 0 || wpos + wl > whi) break;
